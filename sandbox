@@ -1,0 +1,129 @@
+#!/bin/bash
+set -eux
+
+root=$(dirname $0)
+source $root/openrc
+
+db_pass=stackdb
+
+function install_svc {
+  local name=$1
+  local remote=$2
+
+  id $name || useradd -G admin -m $name -s /bin/false
+
+  mkdir -p /opt/stack
+  for d in /var/log/$name /var/run/$name /etc/$name; do
+    mkdir -p $d
+    chown -R $name $d
+  done
+
+  if [ ! -e /opt/stack/$name ]; then
+  #if ! yolk -V $name; then
+    #git clone --depth 1 -b master $remote $temp/$name
+    git clone -b master $remote /opt/stack/$name
+    pip install /opt/stack/$name
+  fi
+}
+
+function create_db {
+  local sql="
+    drop database if exists $1; -- TODO: remove this
+    create database if not exists $1;
+    grant all on $1.* to '$2'@'*'         identified by '$3';
+    grant all on $1.* to '$2'@'localhost' identified by '$3';
+    grant all on $1.* to '$2'@'%'         identified by '$3';
+    flush privileges;"
+  mysql -uroot -p$db_pass -e "$sql"
+}
+
+function install_upstart {
+  local name=$1
+  local user=$2
+  local cmd=$3
+  shift; shift; shift
+  local args=$*
+  cat > /etc/init/$name.conf <<EOF
+start on runlevel [2345]
+stop on runlevel [016]
+setuid $user
+respawn
+exec start-stop-daemon --start --make-pidfile --pidfile /var/run/$user/$name.pid --exec $cmd -- $args >> /var/log/$user/$name.log 2>&1
+EOF
+}
+
+function ensure_root {
+  if (( EUID != 0 )); then
+    echo "You must be root to do this." 1>&2
+    exit 1
+  fi
+}
+
+function install-packages {
+  DEBIAN_FRONTEND=noninteractive apt-get install -y $*
+}
+
+function install_deps {
+  # apt-get update
+  echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
+  echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
+  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb
+  os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
+  #yolk || pip install yolk
+}
+
+################################
+
+function keystone_install {
+  install_svc keystone https://github.com/openstack/keystone.git
+  install_upstart keystone keystone /usr/local/bin/keystone-all "--config-dir /etc/keystone"
+  create_db keystone keystone $db_pass
+}
+
+function keystone_first_start {
+  keystone-manage db_sync
+  service keystone restart
+  sleep 3
+  $root/keystone_setup
+}
+
+################################
+
+function glance_install {
+  install_svc glance https://github.com/openstack/glance.git
+  mkdir -p /var/lib/glance/images && chown -R glance:glance /var/lib/glance/images
+  install_upstart glance-api glance /usr/local/bin/glance-api "--config-dir /etc/glance"
+  create_db glance glance $db_pass
+}
+
+function glance_first_start {
+  glance-manage db_sync
+  service glance-api restart
+}
+
+################################
+
+function install_all {
+  install_deps
+  keystone_install
+  glance_install
+}
+
+function start_all {
+  keystone_first_start
+  glance_first_start
+}
+
+function test_all {
+  echo '' | nc localhost 5000 || die "keystone not running"
+}
+
+function main {
+  ensure_root
+  install_all
+  os-config-applier --templates $root/templates --metadata $root/init-data.json
+  start_all
+  test_all
+}
+
+main

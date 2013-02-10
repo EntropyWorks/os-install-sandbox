@@ -1,0 +1,9 @@
+export NOVA_VERSION=1.1
+export OS_PASSWORD=nomoresecrete
+export OS_AUTH_URL=http://localhost:5000/v2.0
+export OS_SERVICE_ENDPOINT=http://localhost:35357/v2.0
+export OS_USERNAME=demo
+export OS_TENANT_NAME=demo
+export COMPUTE_API_VERSION=1.1
+export OS_NO_CACHE=True
+export SERVICE_TOKEN=foobar

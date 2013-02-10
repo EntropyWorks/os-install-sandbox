@@ -1,0 +1,9 @@
+{
+  "admin-token": "foobar",
+  "keystone": {
+    "db": "mysql://keystone:stackdb@localhost/keystone"
+  },
+  "glance": {
+    "db": "mysql://glance:stackdb@localhost/glance"
+  }
+}
