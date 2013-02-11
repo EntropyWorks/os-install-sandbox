@@ -5,5 +5,11 @@
   },
   "glance": {
     "db": "mysql://glance:stackdb@localhost/glance"
+  },
+  "nova": {
+    "db":    "mysql://nova:stackdb@localhost/nova",
+    "bm_db": "mysql://nova:stackdb@localhost/nova_bm",
+    "virt_power_user": "me",
+    "virt_power_pass": "mypass"
   }
 }

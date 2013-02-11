@@ -9,6 +9,7 @@ db_pass=stackdb
 function install_svc {
   local name=$1
   local remote=$2
+  local branch=${3:-master}
 
   id $name || useradd -G admin -m $name -s /bin/false
 
@@ -21,7 +22,7 @@ function install_svc {
   if [ ! -e /opt/stack/$name ]; then
   #if ! yolk -V $name; then
     #git clone --depth 1 -b master $remote $temp/$name
-    git clone -b master $remote /opt/stack/$name
+    git clone -b $branch $remote /opt/stack/$name
     pip install /opt/stack/$name
   fi
 }
@@ -120,15 +121,40 @@ function horizon_first_start {
 
 ################################
 
+function nova_install {
+  install-packages rabbitmq-server
+  sudo rabbitmqctl change_password guest stackqueue
+  install_svc nova https://github.com/tripleo/nova.git baremetal-dev
+  grep nova /etc/sudoers || echo "nova ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+  mkdir -p /var/run/nova/keys && chown -R nova /var/run/nova/keys
+  install_upstart nova-all nova /usr/local/bin/nova-all "--config-dir /etc/nova"
+  install_upstart nova-conductor nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
+  install_upstart nova-baremetal-deploy-helper nova /usr/local/bin/nova-baremetal-deploy-helper "--config-dir /etc/nova"
+  create_db nova nova $db_pass
+  create_db nova_bm nova $db_pass
+}
+
+function nova_first_start {
+  nova-manage db sync
+  nova-baremetal-manage db sync
+  service nova-all restart
+  service nova-conductor restart
+  service nova-baremetal-deploy-helper restart
+}
+
+################################
+
 function install_all {
   install_deps
   keystone_install
+  nova_install
   glance_install
   horizon_install
 }
 
 function start_all {
   keystone_first_start
+  nova_first_start
   glance_first_start
   horizon_first_start
 }
