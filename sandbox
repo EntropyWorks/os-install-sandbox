@@ -177,7 +177,7 @@ function test_all {
     curl -L -o $root/cirros.qcow2 "https://launchpad.net/cirros/trunk/0.3.0/+download/cirros-0.3.0-x86_64-disk.img"
   fi
 
-  glance image-create ^Cname cirros --is-public true --container-format bare --disk-format qcow2 < cirros.qcow2
+  glance image-create --name cirros --is-public true --container-format bare --disk-format qcow2 < cirros.qcow2
 }
 
 function main {
