@@ -93,7 +93,7 @@ function keystone_first_start {
 function glance_install {
   install_svc glance https://github.com/openstack/glance.git
   mkdir -p /var/lib/glance/images && chown -R glance:glance /var/lib/glance/images
-  install_upstart glance-api glance /usr/local/bin/glance-api "--config-dir /etc/glance"
+  install_upstart glance-api glance /usr/local/bin/glance-api "--debug"
   create_db glance glance $db_pass
 }
 
