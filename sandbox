@@ -86,8 +86,6 @@ function keystone_first_start {
   keystone-manage db_sync
   keystone-manage pki_setup
   service keystone restart
-  sleep 3
-  $root/keystone_setup
 }
 
 ################################
@@ -127,8 +125,12 @@ function nova_install {
   install_svc nova https://github.com/tripleo/nova.git baremetal-dev
   grep nova /etc/sudoers || echo "nova ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
   mkdir -p /var/run/nova/keys && chown -R nova /var/run/nova/keys
-  install_upstart nova-all nova /usr/local/bin/nova-all "--config-dir /etc/nova"
-  install_upstart nova-conductor nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
+  install_upstart nova-api         nova /usr/local/bin/nova-api   "--config-dir /etc/nova"
+  install_upstart nova-cert        nova /usr/local/bin/nova-cert   "--config-dir /etc/nova"
+  install_upstart nova-network     nova /usr/local/bin/nova-network "--config-dir /etc/nova"
+  install_upstart nova-scheduler   nova /usr/local/bin/nova-scheduler "--config-dir /etc/nova"
+  install_upstart nova-consoleauth nova /usr/local/bin/nova-consoleauth   "--config-dir /etc/nova"
+  install_upstart nova-conductor   nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
   install_upstart nova-baremetal-deploy-helper nova /usr/local/bin/nova-baremetal-deploy-helper "--config-dir /etc/nova"
   create_db nova nova $db_pass
   create_db nova_bm nova $db_pass
@@ -137,7 +139,13 @@ function nova_install {
 function nova_first_start {
   nova-manage db sync
   nova-baremetal-manage db sync
-  service nova-all restart
+
+  service nova-api restart
+  sleep 5
+  service nova-cert restart
+  service nova-network restart
+  service nova-scheduler restart
+  service nova-consoleauth restart
   service nova-conductor restart
   service nova-baremetal-deploy-helper restart
 }
@@ -157,6 +165,9 @@ function start_all {
   nova_first_start
   glance_first_start
   horizon_first_start
+  sleep 3
+  $root/keystone_setup
+
 }
 
 function test_all {

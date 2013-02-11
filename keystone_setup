@@ -153,9 +153,9 @@ keystone user-role-add --tenant-id $SERVICE_TENANT \
                        --role-id $ADMIN_ROLE
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
     keystone endpoint-create --region RegionOne --service-id $NOVA_SERVICE \
-        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s" \
-        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s" \
-        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s"
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:\$(compute_port)s/v2/\$(tenant_id)s" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:\$(compute_port)s/v2/\$(tenant_id)s" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:\$(compute_port)s/v2/\$(tenant_id)s"
 fi
 
 EC2_SERVICE=$(get_id \
@@ -262,6 +262,7 @@ ADMIN_SECRET=`echo "$RESULT" | grep secret | awk '{print $4}'`
 RESULT=$(keystone ec2-credentials-create --tenant-id=$DEMO_TENANT --user-id=$DEMO_USER)
 DEMO_ACCESS=`echo "$RESULT" | grep access | awk '{print $4}'`
 DEMO_SECRET=`echo "$RESULT" | grep secret | awk '{print $4}'`
+
 
 # write the secret and access to ec2rc
 cat > $EC2RC <<EOF
