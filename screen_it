@@ -1,0 +1,51 @@
+#!/bin/bash
+set -eu
+
+SCREEN_HARDSTATUS='%{= .} %-Lw%{= .}%> %n%f %t*%{= .}%+Lw%< %-=%{g}(%{d}%H/%l%{g})'
+
+SCREEN_NAME=${SCREEN_NAME:-stack}
+screen -d -m -S $SCREEN_NAME -t shell -s /bin/bash
+# Helper to launch a service in a named screen
+# screen_it service "command-line"
+function screen_it {
+    NL=`echo -ne '\015'`
+    SERVICE_DIR=${SERVICE_DIR:-/tmp/status}
+
+        # Append the service to the screen rc file
+        screen_rc "$1" "$2"
+
+        screen -S $SCREEN_NAME -X screen -t $1
+        # sleep to allow bash to be ready to be send the command - we are
+        # creating a new window in screen and then sends characters, so if
+        # bash isn't running by the time we send the command, nothing happens
+        sleep 1.5
+
+        screen -S $SCREEN_NAME -p $1 -X stuff "$2 || touch \"$SERVICE_DIR/$SCREEN_NAME/$1.failure\"$NL"
+}
+
+
+# Screen rc file builder
+# screen_rc service "command-line"
+function screen_rc {
+    SCREEN_NAME=${SCREEN_NAME:-stack}
+    SCREENRC=/tmp/$SCREEN_NAME-screenrc
+    if [[ ! -e $SCREENRC ]]; then
+        # Name the screen session
+        echo "sessionname $SCREEN_NAME" > $SCREENRC
+        # Set a reasonable statusbar
+        echo "hardstatus alwayslastline '$SCREEN_HARDSTATUS'" >> $SCREENRC
+        echo "screen -t shell bash" >> $SCREENRC
+    fi
+    # If this service doesn't already exist in the screenrc file
+    if ! grep $1 $SCREENRC 2>&1 > /dev/null; then
+        NL=`echo -ne '\015'`
+        echo "screen -t $1 bash" >> $SCREENRC
+        echo "stuff \"$2$NL\"" >> $SCREENRC
+    fi
+}
+
+screen_it horizon "tail -f -n 0 /var/log/horizon/* | ccze -A"
+screen_it keystone "tail -f -n 0 /var/log/keystone/* | ccze -A"
+screen_it glance "tail -f -n 0 /var/log/glance/* | ccze -A"
+screen_it nova "tail -f -n 0 /var/log/nova/* | ccze -A"
+screen_it cinder "tail -f -n 0 /var/log/cinder/* | ccze -A"

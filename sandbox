@@ -60,6 +60,10 @@ function ensure_root {
   fi
 }
 
+function give_sudo {
+  grep $1 /etc/sudoers || echo "$1 ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+}
+
 function install-packages {
   DEBIAN_FRONTEND=noninteractive apt-get install -y $*
 }
@@ -68,7 +72,7 @@ function install_deps {
   # apt-get update
   echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
   echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
-  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb
+  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze
   os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
   #yolk || pip install yolk
 }
@@ -104,6 +108,25 @@ function glance_first_start {
 
 ################################
 
+function cinder_install {
+  install-packages lvm2
+  install_svc cinder https://github.com/openstack/cinder.git
+  give_sudo cinder
+  install_upstart cinder-api cinder /usr/local/bin/cinder-api ""
+  install_upstart cinder-volume cinder /usr/local/bin/cinder-volume ""
+  install_upstart cinder-scheduler cinder /usr/local/bin/cinder-scheduler ""
+  create_db cinder cinder $db_pass
+}
+
+function cinder_first_start {
+  cinder-manage db sync
+  service cinder-api restart
+  service cinder-volume restart
+  service cinder-scheduler restart
+}
+
+################################
+
 function horizon_install {
   install-packages nodejs python-openssl python-dev
   which node || ln -s $(which nodejs) /usr/bin/node
@@ -123,7 +146,7 @@ function nova_install {
   install-packages rabbitmq-server
   sudo rabbitmqctl change_password guest stackqueue
   install_svc nova https://github.com/tripleo/nova.git baremetal-dev
-  grep nova /etc/sudoers || echo "nova ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+  give_sudo nova
   mkdir -p /var/run/nova/keys && chown -R nova /var/run/nova/keys
   install_upstart nova-api         nova /usr/local/bin/nova-api   "--config-dir /etc/nova"
   install_upstart nova-cert        nova /usr/local/bin/nova-cert   "--config-dir /etc/nova"
@@ -158,11 +181,13 @@ function install_all {
   nova_install
   glance_install
   horizon_install
+  cinder_install
 }
 
 function start_all {
   keystone_first_start
   nova_first_start
+  cinder_first_start
   glance_first_start
   horizon_first_start
   sleep 3

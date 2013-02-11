@@ -11,5 +11,8 @@
     "bm_db": "mysql://nova:stackdb@localhost/nova_bm",
     "virt_power_user": "me",
     "virt_power_pass": "mypass"
+  },
+  "cinder": {
+    "db": "mysql://cinder:stackdb@localhost/cinder"
   }
 }
