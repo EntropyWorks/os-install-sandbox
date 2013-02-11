@@ -77,11 +77,13 @@ function install_deps {
 function keystone_install {
   install_svc keystone https://github.com/openstack/keystone.git
   install_upstart keystone keystone /usr/local/bin/keystone-all "--config-dir /etc/keystone"
+  mkdir -p /etc/keystone/ssl && chown -R keystone:keystone /etc/keystone/ssl
   create_db keystone keystone $db_pass
 }
 
 function keystone_first_start {
   keystone-manage db_sync
+  keystone-manage pki_setup
   service keystone restart
   sleep 3
   $root/keystone_setup
@@ -103,19 +105,41 @@ function glance_first_start {
 
 ################################
 
+function horizon_install {
+  install-packages nodejs python-openssl python-dev
+  which node || ln -s $(which nodejs) /usr/bin/node
+  install_svc horizon https://github.com/openstack/horizon.git
+  if [ ! -e /opt/stack/horizon/.venv ]; then python /opt/stack/horizon/tools/install_venv.py; fi
+  mkdir -p /opt/stack/horizon/static && chown -R horizon:horizon /opt/stack/horizon/static
+  install_upstart horizon horizon /opt/stack/horizon/manage.py "runserver 0.0.0.0:8080"
+}
+
+function horizon_first_start {
+  service horizon restart
+}
+
+################################
+
 function install_all {
   install_deps
   keystone_install
   glance_install
+  horizon_install
 }
 
 function start_all {
   keystone_first_start
   glance_first_start
+  horizon_first_start
 }
 
 function test_all {
   echo '' | nc localhost 5000 || die "keystone not running"
+
+  if [ ! -e $root/cirros.img ]; then
+    curl -o $root/corros.img https://launchpad.net/cirros/trunk/0.3.0/+download/cirros-0.3.0-x86_64-disk.img
+  fi
+
 }
 
 function main {
