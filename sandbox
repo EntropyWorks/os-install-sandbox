@@ -80,6 +80,7 @@ function install_deps {
   echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
   echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
   install-packages git ipmitool mysql-server python-dev python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
+  install-packages openvswitch-common openvswitch-controller openvswitch-switch
   os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
   #yolk || pip install yolk
 }
@@ -187,9 +188,6 @@ exec start-stop-daemon --start --make-pidfile --pidfile /var/run/nova/nova-dnsma
 eof
   service stop dnsmasq || echo "dnsmasq not running"
   rm -f /etc/init.d/dnsmasq || ech "no dnsmasq init.d script"
-  install_upstart nova-dnsmasq nova /usr/sbin/dnsmasq "--conf-file= --port=0 --enable-tftp --tftp-root=/tftpboot \
-        --dhcp-boot=pxelinux.0 --bind-interfaces --pid-file=/var/run/dnsmasq.pid \
-        --interface=em3 --dhcp-range='192.0.2.65,192.0.2.69,29'"
   chown -R nova:nova /var/lib/misc/
 }
 
@@ -215,10 +213,11 @@ function quantum_install {
   install_svc quantum https://github.com/openstack/quantum.git
   give_sudo quantum
   mkdir -p /var/lib/quantum && chown -R quantum:quantum /var/lib/quantum
-  install_upstart quantum-server quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum --debug"
-  install_upstart quantum-openvswitch-agent quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum-openvswitch-agent --debug"
-  install_upstart quantum quantum /usr/local/bin/quantum"--config-dir /etc/quantum --debug"
+  install_upstart quantum-server quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum"
+  install_upstart quantum-openvswitch-agent quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum --debug"
+  install_upstart quantum quantum /usr/local/bin/quantum "--config-dir /etc/quantum --debug"
   
+  create_db ovs_quantum quantum $db_pass
 }
 
 function quantum_first_start {
@@ -273,21 +272,28 @@ function test_all {
   # TODO: config
   add_bm_node bm-aw1az2-freecloud0007.freecloud.hpcloud.net 1 4096 20 $IPMI_IP $IPMI_USER $IPMI_PASS $IPMI_MAC
 
+
   PHYSICAL_NETWORK=em3
   TENANT_ID=admin
   ALLOCATION_POOL="start=192.0.2.34,end=192.0.2.38"
   NETWORK_GATEWAY=10.10.16.129
   FIXED_RANGE=192.0.2.32/29
+  OVS_PHYSICAL_BRIDGE=br-ctlplane
+  OVS_VLAN_RANGES=$PHYSICAL_NETWORK
+  Q_PLUGIN_CONF_FILE=/etc/quantum/quantum.conf
+  PUBLIC_INTERFACE=em3
+  #iniset /$Q_PLUGIN_CONF_FILE OVS network_vlan_ranges $OVS_VLAN_RANGES
 #  nova-manage network create --label private --fixed_range_v4 '192.0.2.32/8' --num_networks 1 --network_size 10 --bridge_interface em3
   ovs-vsctl --no-wait -- --may-exist add-br br-ctlplane
-  ovs-vsctl add-port br-ctlplane bm3
+  ovs-vsctl --no-wait -- --may-exist add-port br-ctlplane bm3
   for IP in $(ip addr show dev $PUBLIC_INTERFACE | grep ' inet ' | awk '{print $2}'); do
     sudo ip addr del $IP dev $PUBLIC_INTERFACE
     sudo ip addr add $IP dev $OVS_PHYSICAL_BRIDGE
   done
-  NET_ID=$(quantum net-create $PHYSICAL_NETWORK --tenant_id $TENANT_ID --provider:network_type flat --provider:physical_network "$PHYSICAL_NETWORK" | grep ' id ' | get_field 2)
-  SUBNET_ID=$(quantum subnet-create --tenant_id $TENANT_ID --ip_version 4 ${ALLOCATION_POOL:+--allocation-pool $ALLOCATION_POOL} --gateway $NETWORK_GATEWAY $NET_ID $FIXED_RANGE | grep ' id ' | get_field 2)
- 	 281	
+  NET_ID=$(quantum net-create $PHYSICAL_NETWORK --tenant_id $TENANT_ID --provider:network_type flat --provider:physical_network "$PHYSICAL_NETWORK" | grep ' id ' | awk '{print $2}')
+  echo "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  echo $NET_ID
+  SUBNET_ID=$(quantum subnet-create --tenant_id $TENANT_ID --ip_version 4 --allocation-pool "$ALLOCATION_POOL" --gateway $NETWORK_GATEWAY $NET_ID $FIXED_RANGE | grep ' id ' | awk '{print $2}')
   sudo ifconfig $OVS_PHYSICAL_BRIDGE up
 
   /home/tim/git/incubator/scripts/loadimage ami test /home/tim/test.qcow2

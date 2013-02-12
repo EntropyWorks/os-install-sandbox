@@ -14,5 +14,8 @@
   },
   "cinder": {
     "db": "mysql://cinder:stackdb@localhost/cinder"
+  },
+  "quantum": {
+    "ovs_db": "mysql://quantum:stackdb@localhost/ovs_quantum?charset=utf8"
   }
 }
