@@ -47,6 +47,7 @@ function install_upstart {
   cat > /etc/init/$name.conf <<EOF
 start on runlevel [2345]
 stop on runlevel [016]
+chdir /var/run/$user
 setuid $user
 respawn
 exec start-stop-daemon --start --make-pidfile --pidfile /var/run/$user/$name.pid --exec $cmd -- $args >> /var/log/$user/$name.log 2>&1
@@ -72,7 +73,7 @@ function install_deps {
   # apt-get update
   echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
   echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
-  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze
+  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
   os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
   #yolk || pip install yolk
 }
@@ -148,12 +149,14 @@ function nova_install {
   install_svc nova https://github.com/tripleo/nova.git baremetal-dev
   give_sudo nova
   mkdir -p /var/run/nova/keys && chown -R nova /var/run/nova/keys
-  install_upstart nova-api         nova /usr/local/bin/nova-api   "--config-dir /etc/nova"
-  install_upstart nova-cert        nova /usr/local/bin/nova-cert   "--config-dir /etc/nova"
-  install_upstart nova-network     nova /usr/local/bin/nova-network "--config-dir /etc/nova"
-  install_upstart nova-scheduler   nova /usr/local/bin/nova-scheduler "--config-dir /etc/nova"
-  install_upstart nova-consoleauth nova /usr/local/bin/nova-consoleauth   "--config-dir /etc/nova"
-  install_upstart nova-conductor   nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
+  install_upstart nova-api              nova /usr/local/bin/nova-api   "--config-dir /etc/nova"
+  install_upstart nova-rpc-zmq-receiver nova /usr/local/bin/nova-rpc-zmq-receiver "--config-dir /etc/nova"
+  install_upstart nova-compute          nova /usr/local/bin/nova-compute "--config-dir /etc/nova"
+  install_upstart nova-cert             nova /usr/local/bin/nova-cert   "--config-dir /etc/nova"
+  install_upstart nova-network          nova /usr/local/bin/nova-network "--config-dir /etc/nova"
+  install_upstart nova-scheduler        nova /usr/local/bin/nova-scheduler "--config-dir /etc/nova --debug"
+  install_upstart nova-consoleauth      nova /usr/local/bin/nova-consoleauth   "--config-dir /etc/nova"
+  install_upstart nova-conductor        nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
   install_upstart nova-baremetal-deploy-helper nova /usr/local/bin/nova-baremetal-deploy-helper "--config-dir /etc/nova"
   create_db nova nova $db_pass
   create_db nova_bm nova $db_pass
@@ -166,6 +169,8 @@ function nova_first_start {
   service nova-api restart
   sleep 5
   service nova-cert restart
+  service nova-rpc-zmq-receiver restart
+  service nova-compute restart
   service nova-network restart
   service nova-scheduler restart
   service nova-consoleauth restart
@@ -195,6 +200,11 @@ function start_all {
 
 }
 
+function add_bm_node {
+  id=$(nova-baremetal-manage node create --host $1 --cpus $2 --memory_mb $3 --local_gb $4 --pm_address $5 --pm_user $6 --pm_pass $7 --terminal_port 0 --prov_mac $8)
+  nova-baremetal-manage interface create --node_id $id --mac_address $8 --datapath_id 0 --port_no 0
+}
+
 function test_all {
   echo '' | nc localhost 5000 || die "keystone not running"
 
@@ -202,8 +212,18 @@ function test_all {
     curl -L -o $root/cirros.qcow2 "https://launchpad.net/cirros/trunk/0.3.0/+download/cirros-0.3.0-x86_64-disk.img"
   fi
 
+
   source $root/adminrc
   glance image-create --name cirros --is-public true --container-format bare --disk-format qcow2 < cirros.qcow2
+
+  nova-manage instance_type create --name=x86_bm --cpu=1 --memory=512 --root_gb=0 --ephemeral_gb=0 --flavor=6 --swap=0 --rxtx_factor=1
+  nova-manage instance_type set_key --name=x86_bm --key cpu_arch --value x86_64
+
+  nova-manage instance_type create --name=x86_64_bm --cpu=1 --memory=512 --root_gb=0 --ephemeral_gb=0 --flavor=7 --swap=0 --rxtx_factor=1
+  nova-manage instance_type set_key --name=x86_64_bm --key cpu_arch --value x86_64
+
+  # TODO: hostnames
+  add_bm_node os-all.novalocal 1 4096 20 1.2.3.4 USER PASS 52:54:00:da:b0:55
 }
 
 function main {
