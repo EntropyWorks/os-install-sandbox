@@ -2,6 +2,7 @@
 set -eux
 
 root=$(dirname $0)
+source $root/secrets
 source $root/openrc
 
 db_pass=stackdb
@@ -167,9 +168,16 @@ function nova_install {
   install_upstart nova-baremetal-deploy-helper nova /usr/local/bin/nova-baremetal-deploy-helper "--config-dir /etc/nova"
   create_db nova nova $db_pass
   create_db nova_bm nova $db_pass
+
+  install-packages dnsmasq
+  # TODO: config options:
+  install_upstart nova-dnsmasq nova /usr/sbin/dnsmasq "--conf-file= --port=0 --enable-tftp --tftp-root=/tftpboot \
+        --dhcp-boot=pxelinux.0 --bind-interfaces --pid-file=/var/run/dnsmasq.pid \
+        --interface=em3 --dhcp-range='192.0.2.65,192.0.2.69,29'"
 }
 
 function nova_first_start {
+  service nova-dnsmasq restart
   nova-manage db sync
   nova-baremetal-manage db sync
 
@@ -202,7 +210,7 @@ function start_all {
   cinder_first_start
   glance_first_start
   horizon_first_start
-  sleep 3
+  sleep 10
   $root/keystone_setup
 
 }
@@ -230,7 +238,10 @@ function test_all {
   nova-manage instance_type set_key --name=x86_64_bm --key cpu_arch --value x86_64
 
   # TODO: hostnames
-  add_bm_node os-all.novalocal 1 4096 20 1.2.3.4 USER PASS 52:54:00:da:b0:55
+  # TODO: config
+  add_bm_node bm-aw1az2-freecloud0007.freecloud.hpcloud.net 1 4096 20 $IPMI_IP $IPMI_USER $IPMI_PASS $IPMI_MAC
+
+  nova-manage network create --label private --fixed_range_v4 '192.0.2.32/8' --num_networks 1 --network_size 10 --bridge_interface em3
 }
 
 function main {
@@ -239,6 +250,7 @@ function main {
   os-config-applier --templates $root/templates --metadata $root/init-data.json
   start_all
   test_all
+  echo ok
 }
 
 main
