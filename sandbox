@@ -73,7 +73,7 @@ function install_deps {
   # apt-get update
   echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
   echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
-  install-packages git mysql-server python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
+  install-packages git mysql-server python-dev python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
   os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
   #yolk || pip install yolk
 }
