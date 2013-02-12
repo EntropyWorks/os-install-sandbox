@@ -11,7 +11,12 @@ function install_svc {
   local remote=$2
   local branch=${3:-master}
 
-  id $name || useradd -G admin -m $name -s /bin/false
+  if grep "^sudo:" /etc/group; then
+    id $name || useradd -G sudo -m $name -s /bin/false
+  fi
+  if grep "^admin:" /etc/group; then
+    id $name || useradd -G admin -m $name -s /bin/false
+  fi
 
   mkdir -p /opt/stack
   for d in /var/log/$name /var/run/$name /etc/$name; do
@@ -82,7 +87,7 @@ function install_deps {
 
 function keystone_install {
   install_svc keystone https://github.com/openstack/keystone.git
-  install_upstart keystone keystone /usr/local/bin/keystone-all "--config-dir /etc/keystone"
+  install_upstart keystone keystone /usr/local/bin/keystone-all "--config-dir /etc/keystone --log-config /etc/keystone/logging.conf"
   mkdir -p /etc/keystone/ssl && chown -R keystone:keystone /etc/keystone/ssl
   create_db keystone keystone $db_pass
 }
@@ -99,11 +104,13 @@ function glance_install {
   install_svc glance https://github.com/openstack/glance.git
   mkdir -p /var/lib/glance/images && chown -R glance:glance /var/lib/glance/images
   install_upstart glance-api glance /usr/local/bin/glance-api "--debug"
+  install_upstart glance-reg glance /usr/local/bin/glance-registry "--debug"
   create_db glance glance $db_pass
 }
 
 function glance_first_start {
   glance-manage db_sync
+  service glance-reg restart
   service glance-api restart
 }
 
