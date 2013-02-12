@@ -79,7 +79,7 @@ function install_deps {
   # apt-get update
   echo mysql-server-5.1 mysql-server/root_password password $db_pass | debconf-set-selections
   echo mysql-server-5.1 mysql-server/root_password_again password $db_pass | debconf-set-selections
-  install-packages git mysql-server python-dev python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
+  install-packages git ipmitool mysql-server python-dev python-novaclient python-pip python-numpy python-lxml python-greenlet python-mysqldb ccze libxml2-dev libxslt-dev python-zmq
   os-config-applier --help || pip install -e git+https://github.com/tripleo/os-config-applier.git#egg=os-config-applier
   #yolk || pip install yolk
 }
@@ -104,8 +104,8 @@ function keystone_first_start {
 function glance_install {
   install_svc glance https://github.com/openstack/glance.git
   mkdir -p /var/lib/glance/images && chown -R glance:glance /var/lib/glance/images
-  install_upstart glance-api glance /usr/local/bin/glance-api "--debug"
-  install_upstart glance-reg glance /usr/local/bin/glance-registry "--debug"
+  install_upstart glance-api glance /usr/local/bin/glance-api "--debug --log-config /etc/glance/logging.conf"
+  install_upstart glance-reg glance /usr/local/bin/glance-registry "--debug --log-config /etc/glance/logging.conf"
   create_db glance glance $db_pass
 }
 
@@ -161,7 +161,6 @@ function nova_install {
   install_upstart nova-rpc-zmq-receiver nova /usr/local/bin/nova-rpc-zmq-receiver "--config-dir /etc/nova"
   install_upstart nova-compute          nova /usr/local/bin/nova-compute "--config-dir /etc/nova"
   install_upstart nova-cert             nova /usr/local/bin/nova-cert   "--config-dir /etc/nova"
-  install_upstart nova-network          nova /usr/local/bin/nova-network "--config-dir /etc/nova"
   install_upstart nova-scheduler        nova /usr/local/bin/nova-scheduler "--config-dir /etc/nova --debug"
   install_upstart nova-consoleauth      nova /usr/local/bin/nova-consoleauth   "--config-dir /etc/nova"
   install_upstart nova-conductor        nova /usr/local/bin/nova-conductor "--config-dir /etc/nova"
@@ -169,11 +168,29 @@ function nova_install {
   create_db nova nova $db_pass
   create_db nova_bm nova $db_pass
 
+  # TODO: XXX XXX XXX
+  # stop all dnsmasqs
+  # run nova-compute as root so it can use its dnsmasq helper.
+  # - failed ipmi ssh - host key not accepted?
+
+  mkdir -p /tftpboot/pxelinux.cfg/
+
   install-packages dnsmasq
   # TODO: config options:
+  cat > /etc/init/nova-dnsmasq.conf <<eof
+start on runlevel [2345]
+stop on runlevel [016]
+chdir /var/run/nova
+setuid root
+respawn
+exec start-stop-daemon --start --make-pidfile --pidfile /var/run/nova/nova-dnsmasq.pid --exec /usr/sbin/dnsmasq -- --conf-file= --port=0 --enable-tftp --tftp-root=/tftpboot         --dhcp-boot=pxelinux.0 --bind-interfaces --pid-file=/var/run/dnsmasq.pid         --interface=em3 --dhcp-range='192.0.2.65,192.0.2.69,29' >> /var/log/nova/nova-dnsmasq.log 2>&1
+eof
+  service stop dnsmasq || echo "dnsmasq not running"
+  rm -f /etc/init.d/dnsmasq || ech "no dnsmasq init.d script"
   install_upstart nova-dnsmasq nova /usr/sbin/dnsmasq "--conf-file= --port=0 --enable-tftp --tftp-root=/tftpboot \
         --dhcp-boot=pxelinux.0 --bind-interfaces --pid-file=/var/run/dnsmasq.pid \
         --interface=em3 --dhcp-range='192.0.2.65,192.0.2.69,29'"
+  chown -R nova:nova /var/lib/misc/
 }
 
 function nova_first_start {
@@ -186,7 +203,6 @@ function nova_first_start {
   service nova-cert restart
   service nova-rpc-zmq-receiver restart
   service nova-compute restart
-  service nova-network restart
   service nova-scheduler restart
   service nova-consoleauth restart
   service nova-conductor restart
@@ -195,10 +211,30 @@ function nova_first_start {
 
 ################################
 
+function quantum_install {
+  install_svc quantum https://github.com/openstack/quantum.git
+  give_sudo quantum
+  mkdir -p /var/lib/quantum && chown -R quantum:quantum /var/lib/quantum
+  install_upstart quantum-server quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum --debug"
+  install_upstart quantum-openvswitch-agent quantum /usr/local/bin/quantum-server "--config-dir /etc/quantum-openvswitch-agent --debug"
+  install_upstart quantum quantum /usr/local/bin/quantum"--config-dir /etc/quantum --debug"
+  
+}
+
+function quantum_first_start {
+  service quantum-server restart
+  service quantum-openvswitch-agent restart
+  service quantum restart
+}
+
+################################
+
 function install_all {
+  rm -rf /var/log/quantum /var/log/nova /var/log/glance /var/log/cinder /var/log/keystone || echo "ok"
   install_deps
   keystone_install
   nova_install
+  quantum_install
   glance_install
   horizon_install
   cinder_install
@@ -207,6 +243,7 @@ function install_all {
 function start_all {
   keystone_first_start
   nova_first_start
+  quantum_first_start
   cinder_first_start
   glance_first_start
   horizon_first_start
@@ -231,17 +268,44 @@ function test_all {
   source $root/adminrc
   glance image-create --name cirros --is-public true --container-format bare --disk-format qcow2 < cirros.qcow2
 
-  nova-manage instance_type create --name=x86_bm --cpu=1 --memory=512 --root_gb=0 --ephemeral_gb=0 --flavor=6 --swap=0 --rxtx_factor=1
-  nova-manage instance_type set_key --name=x86_bm --key cpu_arch --value x86_64
-
-  nova-manage instance_type create --name=x86_64_bm --cpu=1 --memory=512 --root_gb=0 --ephemeral_gb=0 --flavor=7 --swap=0 --rxtx_factor=1
-  nova-manage instance_type set_key --name=x86_64_bm --key cpu_arch --value x86_64
 
   # TODO: hostnames
   # TODO: config
   add_bm_node bm-aw1az2-freecloud0007.freecloud.hpcloud.net 1 4096 20 $IPMI_IP $IPMI_USER $IPMI_PASS $IPMI_MAC
 
-  nova-manage network create --label private --fixed_range_v4 '192.0.2.32/8' --num_networks 1 --network_size 10 --bridge_interface em3
+  PHYSICAL_NETWORK=em3
+  TENANT_ID=admin
+  ALLOCATION_POOL="start=192.0.2.34,end=192.0.2.38"
+  NETWORK_GATEWAY=10.10.16.129
+  FIXED_RANGE=192.0.2.32/29
+#  nova-manage network create --label private --fixed_range_v4 '192.0.2.32/8' --num_networks 1 --network_size 10 --bridge_interface em3
+  ovs-vsctl --no-wait -- --may-exist add-br br-ctlplane
+  ovs-vsctl add-port br-ctlplane bm3
+  for IP in $(ip addr show dev $PUBLIC_INTERFACE | grep ' inet ' | awk '{print $2}'); do
+    sudo ip addr del $IP dev $PUBLIC_INTERFACE
+    sudo ip addr add $IP dev $OVS_PHYSICAL_BRIDGE
+  done
+  NET_ID=$(quantum net-create $PHYSICAL_NETWORK --tenant_id $TENANT_ID --provider:network_type flat --provider:physical_network "$PHYSICAL_NETWORK" | grep ' id ' | get_field 2)
+  SUBNET_ID=$(quantum subnet-create --tenant_id $TENANT_ID --ip_version 4 ${ALLOCATION_POOL:+--allocation-pool $ALLOCATION_POOL} --gateway $NETWORK_GATEWAY $NET_ID $FIXED_RANGE | grep ' id ' | get_field 2)
+ 	 281	
+  sudo ifconfig $OVS_PHYSICAL_BRIDGE up
+
+  /home/tim/git/incubator/scripts/loadimage ami test /home/tim/test.qcow2
+  local kernel=$(nova image-list | grep aki | head -1 | awk '{print $2}')
+  local ramdisk=$(nova image-list | grep ari | head -1 | awk '{print $2}')
+
+  nova flavor-create x86_bm    100 512 20 1
+    nova flavor-key x86_bm set \
+            cpu_arch=x86 \
+            deploy_kernel_id=$kernel \
+            deploy_ramdisk_id=$ramdisk
+
+  nova flavor-create x86_64_bm 101 512 20 1
+    nova flavor-key x86_64_bm set \
+            cpu_arch=x86_64 \
+            deploy_kernel_id=$kernel \
+            deploy_ramdisk_id=$ramdisk
+
 }
 
 function main {
